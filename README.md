@@ -1,4 +1,29 @@
-# GitLab Flow on GitHub
+# McClock
+
+McClock is a small macOS menu-bar clock. It shows the local date in ISO 8601
+`YYYY-MM-DD` format alongside the current local time and updates every second.
+Open its menu to toggle seconds, copy the current time, or quit. The seconds setting is saved
+between launches. It has no Dock icon.
+
+To place McClock beside the system clock, hold Command and drag its menu-bar
+item to the right. macOS keeps its own clock at the far-right edge and does not
+offer a setting to replace or hide it. McClock saves its chosen menu-bar
+position across launches.
+
+Requires macOS 13 or newer and the Xcode command-line toolchain.
+
+```sh
+swift test --disable-sandbox
+scripts/build_app.sh
+open build/McClock.app
+```
+
+The build script creates an ad-hoc signed app at `build/McClock.app`. It uses
+the installed Xcode toolchain when Xcode is in `/Applications/Xcode.app`.
+For a validated build, install an Apple Development or Developer ID Application
+certificate and run `MCLOCK_SIGNING_IDENTITY="certificate name" scripts/build_app.sh`.
+
+## GitLab Flow on GitHub
 
 `scripts/gitlab_flow.py` configures a repository with a development branch (its
 current default branch) and ordered environment branches. The default flow is
