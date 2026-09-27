@@ -66,7 +66,7 @@ ticket, verifies the app, and creates a **draft** GitHub Release containing a
 ZIP and SHA-256 checksum. Review the draft and publish it on GitHub.
 
 Before the first release, create a GitHub Actions environment named `release`
-under **Settings → Environments**. Add these environment secrets:
+under **Settings → Environments** and add these environment secrets:
 
 | Secret | Value |
 | --- | --- |
@@ -76,12 +76,32 @@ under **Settings → Environments**. Add these environment secrets:
 | `NOTARY_KEY_ID` | App Store Connect API key ID |
 | `NOTARY_ISSUER_ID` | App Store Connect issuer ID |
 
-On macOS, `base64 -i certificate.p12 | pbcopy` (and likewise for the `.p8`)
-copies the encoded value for entry into the secret field. Never commit these
-files or encoded values. Restrict environment access to `main` and, if desired,
-require approval before the signing job can read its secrets. The local Apple
+To enter the encoded values by hand on macOS, `base64 -i certificate.p12 |
+pbcopy` (and likewise for the `.p8`) copies the value for pasting into the
+secret field. Never commit these files or encoded values. The local Apple
 Development identity is only for development; public direct downloads need
 Developer ID signing and notarization.
+
+### Configure the release environment
+
+With the [GitHub CLI](https://cli.github.com/) authenticated as a repository
+admin, one script creates the environment, restricts it to `main`, and stores
+all five secrets from your local files:
+
+```sh
+gh auth login
+scripts/configure_release_env.sh \
+  --p12 ~/Documents/certificates/DeveloperIDApplication.p12 \
+  --notary-key ~/Documents/certificates/AuthKey_ABC123DEFG.p8
+```
+
+It prompts for the `.p12` export password and for the App Store Connect key ID
+and issuer ID, or takes them from `MCLOCK_P12_PASSWORD`, `NOTARY_KEY_ID`, and
+`NOTARY_ISSUER_ID`. Values reach GitHub over standard input only, so they never
+appear in the process list or the script's output. Re-run the script to rotate a
+certificate or key. Add `--reviewer LOGIN` to require a manual approval before
+the signing job can read the secrets; the script creates the environment with
+no approvals by default.
 
 For each version, update `CFBundleShortVersionString` and increment
 `CFBundleVersion` in [Resources/Info.plist](Resources/Info.plist) through a PR.
