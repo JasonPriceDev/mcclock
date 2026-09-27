@@ -1,63 +1,101 @@
 # McClock
 
-McClock is a small macOS menu-bar clock. It shows the local date in ISO 8601
-`YYYY-MM-DD` format alongside the current local time and updates every second.
-Open its menu to toggle seconds, copy the current time, or quit. The seconds setting is saved
-between launches. It has no Dock icon.
+McClock is a macOS menu-bar clock that shows the local date in ISO 8601
+`YYYY-MM-DD` format followed by the local time. It refreshes every second and
+has no Dock icon.
 
-To place McClock beside the system clock, hold Command and drag its menu-bar
-item to the right. macOS keeps its own clock at the far-right edge and does not
-offer a setting to replace or hide it. McClock saves its chosen menu-bar
-position across launches.
+Its menu lets you toggle seconds, copy the exact date and time shown in the
+menu bar, or quit. The seconds setting persists across launches. To reposition
+McClock, hold Command and drag its menu-bar item. macOS keeps its built-in clock
+at the far right; McClock cannot replace it. The chosen position persists
+across launches.
 
-Requires macOS 13 or newer and the Xcode command-line toolchain.
+## Build and install
+
+Requires macOS 13 or newer and Xcode with the macOS SDK. The tests use Swift
+Testing, so run them with the full Xcode toolchain. With Xcode installed at
+`/Applications/Xcode.app`, run:
 
 ```sh
-swift test --disable-sandbox
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun swift test
 scripts/build_app.sh
 open build/McClock.app
 ```
 
-The build script creates an ad-hoc signed app at `build/McClock.app`. It uses
-the installed Xcode toolchain when Xcode is in `/Applications/Xcode.app`.
-For a validated build, install an Apple Development or Developer ID Application
-certificate and run `MCLOCK_SIGNING_IDENTITY="certificate name" scripts/build_app.sh`.
-
-## GitLab Flow on GitHub
-
-`scripts/gitlab_flow.py` configures a repository with a development branch (its
-current default branch) and ordered environment branches. The default flow is
-`main -> staging -> production` when the repository's default branch is `main`.
-
-Requirements: Python 3, [GitHub CLI](https://cli.github.com/) authenticated with
-repository Administration (write) and Contents (write) permissions. Initialize
-the default branch with a commit before running the script.
+The build script creates `build/McClock.app` and signs it ad hoc by default.
+It selects `/Applications/Xcode.app` automatically when `DEVELOPER_DIR` is
+unset; set `DEVELOPER_DIR` yourself if Xcode is elsewhere.
+To sign with an installed Apple Development or Developer ID Application identity,
+first find its SHA-1 hash with `security find-identity -v -p codesigning`, then run:
 
 ```sh
-python3 scripts/gitlab_flow.py configure --repo OWNER/REPO
-python3 scripts/gitlab_flow.py configure --repo OWNER/REPO --apply
-
-# After changes land on the default branch:
-python3 scripts/gitlab_flow.py promote --repo OWNER/REPO --to staging --apply
-python3 scripts/gitlab_flow.py promote --repo OWNER/REPO --to production --apply
+MCLOCK_SIGNING_IDENTITY=SHA1_FROM_ABOVE scripts/build_app.sh
 ```
 
-Omit `--apply` to preview. Choose a different ordered chain with
-`--environments qa,staging,production` on **every** command. Re-running
-`configure --apply` leaves existing environment branches in place and updates
-the two `gitlab-flow:` rulesets managed by this script. Other rulesets remain
-untouched.
+On this Mac, Apple Development signing also prevents the `linkd`
+`requiresValidatedBundle` warning seen with the ad hoc build. The identity must
+appear under `valid identities` in the `security find-identity` output.
 
-The configuration disables merge commits and rebase merges at repository level,
-allows squash merging for feature PRs, and requires PRs for the default branch.
-It protects the default and environment branches against force pushes, deletion,
-and merge commits. Environment branches allow ordinary fast-forward updates so
-the promotion command can preserve commit ancestry. The command accepts only
-the immediately preceding branch as the source and refuses divergent history.
+To install the built app for your user account, quit any running McClock copy
+from its menu, then run:
 
-GitHub rulesets do not enforce that environment updates come only from their
-predecessor; users with write access can still push other linear commits there.
-Restrict write access or use a dedicated promotion actor if that policy is
-required. Do not use GitHub's squash/rebase PR merge button for promotions:
-GitHub creates new commit SHAs, which breaks the ancestry this flow needs.
-Existing commits and any existing branch protection rules are not rewritten.
+```sh
+mkdir -p ~/Applications
+ditto build/McClock.app ~/Applications/McClock.app
+open ~/Applications/McClock.app
+```
+
+Run only one copy at a time to avoid duplicate clocks in the menu bar. Use the
+same `ditto` command to update an existing installation after quitting it.
+
+## Repository workflow
+
+Changes reach `main` through squash-merged pull requests. The `main` ruleset
+requires a pull request and linear history, and blocks force pushes and branch
+deletion. There are no environment branches. The [CI workflow](.github/workflows/ci.yml)
+runs tests and builds the universal app for pull requests and pushes to `main`.
+
+## Publish a GitHub Release
+
+The [release workflow](.github/workflows/release.yml) publishes a universal
+macOS app for Apple silicon and Intel. It runs only when started manually from
+`main` with an existing `vMAJOR.MINOR.PATCH` tag pointing to a commit on `main`.
+It checks the tag against `CFBundleShortVersionString`, runs the tests, signs
+with a Developer ID Application certificate, notarizes with Apple, staples the
+ticket, verifies the app, and creates a **draft** GitHub Release containing a
+ZIP and SHA-256 checksum. Review the draft and publish it on GitHub.
+
+Before the first release, create a GitHub Actions environment named `release`
+under **Settings → Environments**. Add these environment secrets:
+
+| Secret | Value |
+| --- | --- |
+| `DEVELOPER_ID_P12_BASE64` | Base64 of an exported **Developer ID Application** `.p12` certificate and private key |
+| `DEVELOPER_ID_P12_PASSWORD` | Export password for that `.p12` |
+| `NOTARY_API_KEY_BASE64` | Base64 of an App Store Connect **team** API key `.p8` |
+| `NOTARY_KEY_ID` | App Store Connect API key ID |
+| `NOTARY_ISSUER_ID` | App Store Connect issuer ID |
+
+On macOS, `base64 -i certificate.p12 | pbcopy` (and likewise for the `.p8`)
+copies the encoded value for entry into the secret field. Never commit these
+files or encoded values. Restrict environment access to `main` and, if desired,
+require approval before the signing job can read its secrets. The local Apple
+Development identity is only for development; public direct downloads need
+Developer ID signing and notarization.
+
+For each version, update `CFBundleShortVersionString` and increment
+`CFBundleVersion` in [Resources/Info.plist](Resources/Info.plist) through a PR.
+After merging, create and push an annotated tag on that `main` commit:
+
+```sh
+git switch main
+git pull --ff-only
+git tag -a v1.0.0 -m 'McClock v1.0.0'
+git push origin v1.0.0
+```
+
+Then run **Actions → Release McClock → Run workflow** from `main`, entering
+`v1.0.0`. Inspect the draft release, its asset, checksum, and workflow logs
+before publishing. Use the version appropriate to that release in place of
+`v1.0.0`. The latest published version will be at
+<https://github.com/JasonPriceDev/mcclock/releases/latest>.

@@ -1,6 +1,10 @@
 import Foundation
 
 enum ClockFormatter {
+    static func display(at date: Date, includeSeconds: Bool) -> String {
+        "\(self.date(at: date)) \(time(at: date, includeSeconds: includeSeconds))"
+    }
+
     static func time(
         at date: Date,
         includeSeconds: Bool,

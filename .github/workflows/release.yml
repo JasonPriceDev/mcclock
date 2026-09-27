@@ -1,0 +1,96 @@
+name: Release McClock
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag on main, such as v1.0.0
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mcclock-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-15
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - name: Check out main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate tag and source commit
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          WORKFLOW_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          [[ "$WORKFLOW_REF" == refs/heads/main ]] || { echo 'Run this workflow from main.' >&2; exit 1; }
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { echo 'Use a vMAJOR.MINOR.PATCH tag.' >&2; exit 1; }
+          git fetch origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+          release_commit=$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")
+          git merge-base --is-ancestor "$release_commit" origin/main || { echo 'Tag must point to a commit on main.' >&2; exit 1; }
+          git checkout --detach "$release_commit"
+          plist_version=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' Resources/Info.plist)
+          [[ "$RELEASE_TAG" == "v$plist_version" ]] || { echo 'Tag and app version differ.' >&2; exit 1; }
+
+      - name: Run tests
+        run: xcrun swift test
+
+      - name: Sign, notarize, and package
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          DEVELOPER_ID_P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
+          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          NOTARY_API_KEY_BASE64: ${{ secrets.NOTARY_API_KEY_BASE64 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          : "${DEVELOPER_ID_P12_BASE64:?Missing release environment secret}"
+          : "${DEVELOPER_ID_P12_PASSWORD:?Missing release environment secret}"
+          : "${NOTARY_API_KEY_BASE64:?Missing release environment secret}"
+          : "${NOTARY_KEY_ID:?Missing release environment secret}"
+          : "${NOTARY_ISSUER_ID:?Missing release environment secret}"
+          keychain="$RUNNER_TEMP/mcclock-release.keychain-db"
+          certificate="$RUNNER_TEMP/developer-id.p12"
+          export NOTARY_KEY_PATH="$RUNNER_TEMP/notary-api-key.p8"
+          keychain_password=$(openssl rand -base64 32)
+          cleanup() {
+            security delete-keychain "$keychain" 2>/dev/null || true
+            rm -f "$certificate" "$NOTARY_KEY_PATH"
+          }
+          trap cleanup EXIT
+          printf '%s' "$DEVELOPER_ID_P12_BASE64" | base64 --decode > "$certificate"
+          printf '%s' "$NOTARY_API_KEY_BASE64" | base64 --decode > "$NOTARY_KEY_PATH"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security import "$certificate" -k "$keychain" -P "$DEVELOPER_ID_P12_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain"
+          security list-keychains -d user -s "$keychain"
+          identity=$(security find-identity -v -p codesigning "$keychain" | sed -n 's/.*\([A-F0-9]\{40\}\) "Developer ID Application:.*"/\1/p')
+          [[ $(printf '%s\n' "$identity" | sed '/^$/d' | wc -l | tr -d ' ') == 1 ]] || { echo 'Expected exactly one Developer ID Application identity in the P12.' >&2; exit 1; }
+          export MCLOCK_SIGNING_IDENTITY="$identity"
+          scripts/package_release.sh "$RELEASE_TAG"
+
+      - name: Create draft GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release create "$RELEASE_TAG" \
+            "build/McClock-$RELEASE_TAG-universal.zip" \
+            "build/McClock-$RELEASE_TAG-universal.zip.sha256" \
+            --draft --generate-notes --verify-tag --title "McClock $RELEASE_TAG"
