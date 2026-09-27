@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    runs-on: macos-15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Run tests
+        run: xcrun swift test
+      - name: Build universal app
+        run: |
+          MCLOCK_ARCHS='arm64 x86_64' scripts/build_app.sh
+          xcrun lipo build/McClock.app/Contents/MacOS/McClock -verify_arch arm64
+          xcrun lipo build/McClock.app/Contents/MacOS/McClock -verify_arch x86_64
+          codesign --verify --strict --verbose=2 build/McClock.app

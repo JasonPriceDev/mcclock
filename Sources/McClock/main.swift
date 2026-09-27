@@ -21,7 +21,7 @@ final class ClockAppDelegate: NSObject, NSApplicationDelegate {
         secondsItem.target = self
         menu.addItem(secondsItem)
 
-        let copyItem = NSMenuItem(title: "Copy Time", action: #selector(copyTime), keyEquivalent: "c")
+        let copyItem = NSMenuItem(title: "Copy Date & Time", action: #selector(copyTime), keyEquivalent: "c")
         copyItem.target = self
         menu.addItem(copyItem)
         menu.addItem(.separator())
@@ -42,9 +42,7 @@ final class ClockAppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func refresh() {
         let now = Date()
-        let localDate = ClockFormatter.date(at: now)
-        let localTime = ClockFormatter.time(at: now, includeSeconds: showSeconds)
-        statusItem.button?.title = "\(localDate) \(localTime)"
+        statusItem.button?.title = ClockFormatter.display(at: now, includeSeconds: showSeconds)
         secondsItem.state = showSeconds ? .on : .off
     }
 
@@ -54,7 +52,7 @@ final class ClockAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func copyTime() {
-        let value = ClockFormatter.time(at: Date(), includeSeconds: showSeconds)
+        guard let value = statusItem.button?.title else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(value, forType: .string)
     }
